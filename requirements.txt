@@ -1,0 +1,12 @@
+# Runtime dependencies — Python 3.11, Linux x86_64 (verified to resolve together as manylinux wheels)
+watchdog==7.1.1
+pillow==13.0.0
+numpy==2.4.6
+opencv-contrib-python-headless==4.14.0.94
+rawpy==0.28.0
+onnxruntime==1.32.0
+google-genai==3.6.1
+pydantic==2.14.4
+pydantic-settings==2.16.3
+paramiko==5.1.0
+httpx==0.28.1

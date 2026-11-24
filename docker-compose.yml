@@ -1,0 +1,30 @@
+# UGREEN NASync DXP2800 (Intel N100, 8 GB RAM) — runs 24/7 next to other media services.
+# Adjust the host path on the left of each volume to your UGOS shared folder.
+services:
+  photo-pipeline:
+    image: ghcr.io/${GHCR_OWNER:-your-github-user}/photo-pipeline:latest
+    # To build locally on the NAS instead of pulling from GHCR, uncomment:
+    # build: .
+    container_name: photo-pipeline
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      TZ: Europe/Rome
+      PIPELINE_ENV_FILE: /nonexistent  # variables come from env_file above
+    user: "${PUID:-1000}:${PGID:-1000}"
+    volumes:
+      - /volume1/PhotoPipeline:/data
+    # Resource limits: leave headroom for Jellyfin/Plex/Immich & co.
+    cpus: "2.5"
+    mem_limit: 2560m
+    memswap_limit: 2560m
+    cpu_shares: 512
+    pids_limit: 256
+    stop_grace_period: 2m
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
