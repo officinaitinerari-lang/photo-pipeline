@@ -42,3 +42,16 @@ def test_upload_tracking(tmp_path):
     db.set_upload_status(up.id, UPLOAD_UPLOADED)
     assert db.uploads_needing_transfer() == []
     assert db.ensure_upload(job_id, "adobe", tmp_path / "c.jpg", "c.jpg").status == UPLOAD_UPLOADED
+
+
+def test_jobs_missing_upload_for_newly_enabled_platform(tmp_path):
+    db = Database(tmp_path / "p.db")
+    micro = tmp_path / "m.jpg"
+    _, safe = db.enqueue(tmp_path / "s.jpg", "s1")
+    db.update_job(safe, status=STATUS_COMPLETED, commercial_safe=1, microstock_path=str(micro))
+    _, unsafe = db.enqueue(tmp_path / "u.jpg", "u1")
+    db.update_job(unsafe, status=STATUS_COMPLETED, commercial_safe=0, microstock_path=str(micro))
+    assert db.jobs_missing_upload("shutterstock") == [(safe, str(micro))]
+    db.ensure_upload(safe, "shutterstock", micro, "m.jpg")
+    assert db.jobs_missing_upload("shutterstock") == []
+    assert db.jobs_missing_upload("adobe") == [(safe, str(micro))]
