@@ -3,7 +3,7 @@ import zipfile
 
 import pytest
 
-from src.packaging import PackagingError, package_files, plan_parts
+from src.packaging import PackagingError, TooManyPartsError, package_files, plan_parts
 
 MB = 1024 * 1024
 
@@ -70,3 +70,22 @@ def test_stale_parts_removed(tmp_path):
     (out_dir / "prints_fullbleed_part9.zip").write_bytes(b"old")
     package_files(_make_files(src, [1]), out_dir, "prints_fullbleed", 5 * MB)
     assert sorted(p.name for p in out_dir.iterdir()) == ["prints_fullbleed.zip"]
+
+
+def test_max_parts_respected(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    files = _make_files(src, [0.6, 0.6, 0.6])
+    out = package_files(files, tmp_path / "out", "p", 1 * MB, max_parts=3)
+    assert len(out) == 3
+
+
+def test_too_many_parts_raises_and_writes_nothing(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    files = _make_files(src, [0.6, 0.6, 0.6])
+    out_dir = tmp_path / "out"
+    with pytest.raises(TooManyPartsError):
+        package_files(files, out_dir, "p", 1 * MB, max_parts=2)
+    assert not out_dir.exists() or not list(out_dir.glob("*.zip"))
+    assert issubclass(TooManyPartsError, PackagingError)
