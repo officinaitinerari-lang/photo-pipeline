@@ -28,14 +28,19 @@ from .image_loader import ImageLoadError, LoadedImage, load_image, make_preview_
 from .metadata_writer import export_microstock_jpeg, write_metadata
 from .mockup_generator import generate_mockups
 from .notifier import TelegramNotifier
-from .packaging import PackagingError, package_files
-from .print_generator import FORMATS, POSTER_FORMAT_KEYS, generate_prints
+from .packaging import PackagingError, TooManyPartsError, package_files
+from .print_generator import FORMATS, POSTER_FORMAT_KEYS, PrintOutputs, generate_prints
 from .smart_crop import find_focus
 from .upscaler import upscale_if_needed
 
 log = logging.getLogger(__name__)
 
 PERMANENT_ERRORS = (ImageLoadError, PackagingError)
+
+
+def _close_previews(prints: PrintOutputs) -> None:
+    for im in (prints.fullbleed_preview, prints.poster_preview, *prints.crop_previews.values()):
+        im.close()
 
 
 def slugify(text: str, max_len: int = 60) -> str:
@@ -69,12 +74,19 @@ class JobResult:
 
 
 # ----------------------------------------------------------------------------- texts
+def _has_posters(slug_zips: list[str]) -> bool:
+    return any(z.startswith("prints_gallery_poster") for z in slug_zips)
+
+
 def _what_you_get_en(slug_zips: list[str], orientation: str, dpi: int) -> str:
-    lines = [f"• {len(FORMATS)} full-bleed high-resolution JPEG files + {len(POSTER_FORMAT_KEYS)} Gallery Poster editions, {dpi} DPI, sRGB"]
+    posters = _has_posters(slug_zips)
+    extra = f" + {len(POSTER_FORMAT_KEYS)} Gallery Poster editions" if posters else ""
+    lines = [f"• {len(FORMATS)} full-bleed high-resolution JPEG files{extra}, {dpi} DPI, sRGB"]
     for f in FORMATS:
         w, h = f.pixels(orientation)
         lines.append(f"  - {f.ratio_label} ({w}x{h} px) → prints {', '.join(f.sizes_in)}{'' if f.key == 'iso_A_series' else ' in'} / {', '.join(f.sizes_cm)} cm")
-    lines.append("• Gallery Poster edition (warm white paper margins + typography): 2:3 and ISO A")
+    if posters:
+        lines.append("• Gallery Poster edition (warm white paper margins + typography): 2:3 and ISO A")
     lines.append(f"• Delivered as ZIP: {', '.join(slug_zips)}")
     lines.append("• INSTANT DIGITAL DOWNLOAD — no physical item will be shipped. Frame not included.")
     lines.append("• Colours may vary slightly depending on monitor and printer. For personal use only.")
@@ -82,11 +94,14 @@ def _what_you_get_en(slug_zips: list[str], orientation: str, dpi: int) -> str:
 
 
 def _what_you_get_it(slug_zips: list[str], orientation: str, dpi: int) -> str:
-    lines = [f"• {len(FORMATS)} file JPEG ad alta risoluzione a stampa piena + {len(POSTER_FORMAT_KEYS)} versioni Gallery Poster, {dpi} DPI, sRGB"]
+    posters = _has_posters(slug_zips)
+    extra = f" + {len(POSTER_FORMAT_KEYS)} versioni Gallery Poster" if posters else ""
+    lines = [f"• {len(FORMATS)} file JPEG ad alta risoluzione a stampa piena{extra}, {dpi} DPI, sRGB"]
     for f in FORMATS:
         w, h = f.pixels(orientation)
         lines.append(f"  - {f.ratio_label} ({w}x{h} px) → stampe {', '.join(f.sizes_cm)} cm / {', '.join(f.sizes_in)}{'' if f.key == 'iso_A_series' else ' in'}")
-    lines.append("• Versione Gallery Poster (margini carta bianco caldo + tipografia): 2:3 e ISO A")
+    if posters:
+        lines.append("• Versione Gallery Poster (margini carta bianco caldo + tipografia): 2:3 e ISO A")
     lines.append(f"• Consegna in ZIP: {', '.join(slug_zips)}")
     lines.append("• DOWNLOAD DIGITALE IMMEDIATO — nessun prodotto fisico verrà spedito. Cornice non inclusa.")
     lines.append("• I colori possono variare leggermente in base a monitor e stampante. Solo per uso personale.")
@@ -190,6 +205,56 @@ class Pipeline:
         return done
 
     # ------------------------------------------------------------------ steps
+    def _prints_and_zips(
+        self, loaded: LoadedImage, focus, slug: str, ai: AIAnalysis, work: Path, stage: Path
+    ) -> tuple[PrintOutputs, list[Path]]:
+        """Render the prints and zip them into at most `etsy_max_files` archives (Etsy's per-listing limit).
+
+        Very detailed photos (foliage, water, gravel) produce heavier JPEGs. When the zips would exceed the
+        limit, the prints are rendered again at a slightly lower JPEG quality, never below `jpeg_quality_min`.
+        If even that does not fit, the Gallery Poster set is left out: the full-bleed set always fits,
+        because every print is smaller than one zip.
+        """
+        s = self.s
+        quality = s.jpeg_quality_prints
+        while True:
+            prints = generate_prints(
+                loaded.image, orientation=loaded.orientation, focus=focus, slug=slug, out_dir=work,
+                title=ai.poster_title, subtitle=ai.poster_subtitle, fonts_dir=str(s.fonts_dir),
+                dpi=s.print_dpi, quality=quality, min_quality=s.jpeg_quality_min,
+                max_file_bytes=s.max_print_file_bytes,
+            )
+            full: list[Path] = []
+            try:
+                full = package_files(
+                    prints.fullbleed_files, stage, "prints_fullbleed", s.etsy_zip_max_bytes, s.etsy_max_files
+                )
+                slots_left = s.etsy_max_files - len(full)
+                if slots_left < 1:
+                    raise TooManyPartsError("no archive slot left for the gallery posters")
+                posters = package_files(
+                    prints.poster_files, stage, "prints_gallery_poster", s.etsy_zip_max_bytes, slots_left
+                )
+                if quality != s.jpeg_quality_prints:
+                    log.info("prints re-encoded to respect the Etsy file limit", extra={"quality": quality})
+                return prints, full + posters
+            except TooManyPartsError as exc:
+                if quality > s.jpeg_quality_min:
+                    _close_previews(prints)
+                    gc.collect()
+                    quality = max(s.jpeg_quality_min, quality - s.jpeg_quality_step)
+                    log.info("too many zips for Etsy, retrying at lower JPEG quality",
+                             extra={"reason": str(exc), "quality": quality})
+                    continue
+                if not full:
+                    _close_previews(prints)
+                    raise
+                for stale in stage.glob("prints_gallery_poster*.zip"):
+                    stale.unlink()
+                log.warning("gallery posters left out to respect the Etsy file limit",
+                            extra={"zips": len(full), "limit": s.etsy_max_files})
+                return prints, full
+
     def _process(self, job: Job, src: Path) -> JobResult:
         s = self.s
         loaded: LoadedImage = load_image(src, s.input_dir, s.analog_keyword_list)
@@ -222,25 +287,17 @@ class Pipeline:
             if work.exists():
                 shutil.rmtree(work)
             stage = work / slug
-            prints = generate_prints(
-                loaded.image, orientation=loaded.orientation, focus=focus, slug=slug, out_dir=work,
-                title=ai.poster_title, subtitle=ai.poster_subtitle, fonts_dir=str(s.fonts_dir),
-                dpi=s.print_dpi, quality=s.jpeg_quality_prints, min_quality=s.jpeg_quality_min,
-                max_file_bytes=s.max_print_file_bytes,
-            )
+            prints, zips = self._prints_and_zips(loaded, focus, slug, ai, work, stage)
             loaded.close()
             gc.collect()
 
             try:
-                zips = package_files(prints.fullbleed_files, stage, "prints_fullbleed", s.etsy_zip_max_bytes)
-                zips += package_files(prints.poster_files, stage, "prints_gallery_poster", s.etsy_zip_max_bytes)
                 mockups = generate_mockups(
                     prints.fullbleed_preview, prints.poster_preview, prints.crop_previews,
                     loaded.orientation, stage / "mockups", str(s.fonts_dir), s.print_dpi,
                 )
             finally:
-                for im in (prints.fullbleed_preview, prints.poster_preview, *prints.crop_previews.values()):
-                    im.close()
+                _close_previews(prints)
             (stage / "etsy_listing.txt").write_text(
                 build_etsy_listing(ai, slug, zips, loaded.orientation, s.print_dpi), encoding="utf-8"
             )

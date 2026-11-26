@@ -18,12 +18,19 @@ class PackagingError(Exception):
     pass
 
 
+class TooManyPartsError(PackagingError):
+    """The files need more archives than allowed (Etsy accepts at most 5 files per listing)."""
+
+
 def _entry_cost(path: Path) -> int:
     return path.stat().st_size + _ENTRY_OVERHEAD + 2 * len(path.name.encode("utf-8"))
 
 
-def plan_parts(files: list[Path], max_bytes: int) -> list[list[Path]]:
-    """First-fit-decreasing bin packing of files into parts whose STORED zip fits max_bytes."""
+def plan_parts(files: list[Path], max_bytes: int, max_parts: int | None = None) -> list[list[Path]]:
+    """First-fit-decreasing bin packing of files into parts whose STORED zip fits max_bytes.
+
+    Raises TooManyPartsError when more than `max_parts` archives would be needed.
+    """
     budget = max_bytes - _ARCHIVE_OVERHEAD
     bins: list[tuple[int, list[Path]]] = []
     for f in sorted(files, key=_entry_cost, reverse=True):
@@ -37,21 +44,25 @@ def plan_parts(files: list[Path], max_bytes: int) -> list[list[Path]]:
                 break
         else:
             bins.append((cost, [f]))
+    if max_parts is not None and len(bins) > max_parts:
+        raise TooManyPartsError(f"{len(files)} files need {len(bins)} archives, limit is {max_parts}")
     # stable, human friendly order inside each part
     return [sorted(items, key=lambda p: p.name) for _, items in bins]
 
 
-def package_files(files: list[Path], out_dir: Path, base_name: str, max_bytes: int) -> list[Path]:
+def package_files(
+    files: list[Path], out_dir: Path, base_name: str, max_bytes: int, max_parts: int | None = None
+) -> list[Path]:
     """Write `<base>.zip` or `<base>_part1.zip`, `<base>_part2.zip`... each <= max_bytes.
 
     JPEGs are already compressed, so entries are STORED (fast on low-power CPUs, size predictable).
     """
     if not files:
         return []
+    parts = plan_parts(files, max_bytes, max_parts)  # plan first: nothing is written if it cannot fit
     out_dir.mkdir(parents=True, exist_ok=True)
     for stale in out_dir.glob(f"{base_name}*.zip"):
         stale.unlink()
-    parts = plan_parts(files, max_bytes)
     written: list[Path] = []
     for idx, items in enumerate(parts, start=1):
         name = f"{base_name}.zip" if len(parts) == 1 else f"{base_name}_part{idx}.zip"

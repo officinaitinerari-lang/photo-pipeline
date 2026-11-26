@@ -51,7 +51,7 @@ class Settings(BaseSettings):
 
     # --- Gemini ----------------------------------------------------------------
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.5-flash"
+    gemini_model: str = "gemini-3.8-flash"
     gemini_min_interval_seconds: float = 6.0
     gemini_max_retries: int = 6
     gemini_backoff_base_seconds: float = 4.0
@@ -76,6 +76,8 @@ class Settings(BaseSettings):
 
     # --- Etsy packaging ------------------------------------------------------------
     etsy_zip_max_mb: float = 19.5
+    etsy_max_files: int = 5  # Etsy accepts at most 5 digital files per listing
+    jpeg_quality_step: int = 4  # quality drop per retry when the prints don't fit in etsy_max_files
 
     # --- Microstock ------------------------------------------------------------------
     microstock_jpeg_quality: int = 95
