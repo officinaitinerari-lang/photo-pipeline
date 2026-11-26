@@ -69,14 +69,14 @@ def cmd_run(settings: Settings) -> int:
         extra={"dry_run": settings.dry_run, "targets": [t.name for t in settings.upload_targets()],
                "model": settings.gemini_model, "upscale_engine": settings.upscale_engine},
     )
-    last_upload_retry = time.monotonic()
+    last_upload_retry = time.monotonic() - UPLOAD_RETRY_INTERVAL_S - 1  # first retry right after start-up
     try:
         while not stop.is_set():
             _write_heartbeat(settings.heartbeat_path)
             job = db.claim_next()
             if job is None:
                 if not settings.dry_run and time.monotonic() - last_upload_retry > UPLOAD_RETRY_INTERVAL_S:
-                    last_upload_retry = time.monotonic()
+                    last_upload_retry = time.monotonic() - UPLOAD_RETRY_INTERVAL_S - 1  # first retry right after start-up
                     pipeline.retry_pending_uploads()
                 stop.wait(settings.worker_idle_seconds)
                 continue

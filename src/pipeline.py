@@ -184,6 +184,11 @@ class Pipeline:
             log.info("DRY_RUN active: pending uploads left untouched")
             return 0
         targets = {t.name: t for t in self.s.upload_targets()}
+        for name in targets:  # photos processed before this platform was enabled
+            for job_id, micro in self.db.jobs_missing_upload(name):
+                if Path(micro).exists():
+                    self.db.ensure_upload(job_id, name, Path(micro), Path(micro).name)
+                    log.info("upload queued for earlier photo", extra={"platform": name, "file": Path(micro).name})
         done = 0
         for up in self.db.uploads_needing_transfer():
             target = targets.get(up.platform)

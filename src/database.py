@@ -271,6 +271,19 @@ class Database:
         ).fetchone()
         return self._row_to_upload(row)
 
+    def jobs_missing_upload(self, platform: str) -> list[tuple[int, str]]:
+        """Completed, commercially safe jobs that have a microstock file but no upload row for `platform`.
+
+        Happens when a photo was processed while that platform was still disabled.
+        """
+        rows = self._connection().execute(
+            "SELECT id, microstock_path FROM jobs j WHERE status=? AND commercial_safe=1 "
+            "AND microstock_path IS NOT NULL AND NOT EXISTS "
+            "(SELECT 1 FROM uploads u WHERE u.job_id=j.id AND u.platform=?) ORDER BY id",
+            (STATUS_COMPLETED, platform),
+        ).fetchall()
+        return [(int(r["id"]), r["microstock_path"]) for r in rows]
+
     def set_upload_status(self, upload_id: int, status: str, error: str | None = None) -> None:
         now = time.time()
         with self._conn() as c:

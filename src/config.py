@@ -70,12 +70,12 @@ class Settings(BaseSettings):
     upscale_tile_overlap: int = 24
     onnx_threads: int = 2
     print_dpi: int = 300
-    max_print_file_mb: float = 19.0
+    max_print_file_mb: float = 18.5
     jpeg_quality_prints: int = 95
     jpeg_quality_min: int = 82
 
     # --- Etsy packaging ------------------------------------------------------------
-    etsy_zip_max_mb: float = 19.5
+    etsy_zip_max_mb: float = 19.0  # Etsy caps each file at 20 MB (decimal): 19 MiB = 19.9 MB
     etsy_max_files: int = 5  # Etsy accepts at most 5 digital files per listing
     jpeg_quality_step: int = 4  # quality drop per retry when the prints don't fit in etsy_max_files
 
