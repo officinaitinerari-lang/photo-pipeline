@@ -137,6 +137,7 @@ class Pipeline:
         self.db = db
         self.notifier = notifier or TelegramNotifier(settings.telegram_bot_token, settings.telegram_chat_id)
         self._analyzer: GeminiAnalyzer | None = None
+        self._etsy = None
 
     @property
     def analyzer(self) -> GeminiAnalyzer:
@@ -177,6 +178,18 @@ class Pipeline:
         self.db.update_job(job.id, status=STATUS_COMPLETED, error=None, src_path=str(processed))
         log.info("job completed", extra={**ctx, "slug": result.slug, "upscale": result.upscale_method})
         self._notify_done(result)
+
+    def sync_etsy_drafts(self) -> int:
+        """Create Etsy drafts for finished packages (never fails the worker loop)."""
+        try:
+            if self._etsy is None:
+                from .etsy_publisher import EtsyClient
+
+                self._etsy = EtsyClient(self.s)
+            return self._etsy.sync()
+        except Exception as exc:  # Etsy problems must never stop the pipeline
+            log.warning("Etsy sync skipped", extra={"reason": str(exc)})
+            return 0
 
     def retry_pending_uploads(self) -> int:
         """Upload files whose transfer previously failed or ran in DRY_RUN (no-op while DRY_RUN)."""

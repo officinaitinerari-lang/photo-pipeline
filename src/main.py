@@ -70,14 +70,19 @@ def cmd_run(settings: Settings) -> int:
                "model": settings.gemini_model, "upscale_engine": settings.upscale_engine},
     )
     last_upload_retry = time.monotonic() - UPLOAD_RETRY_INTERVAL_S - 1  # first retry right after start-up
+    etsy_interval = settings.etsy_sync_minutes * 60
+    last_etsy_sync = time.monotonic() - etsy_interval - 1  # first Etsy sync right after start-up
     try:
         while not stop.is_set():
             _write_heartbeat(settings.heartbeat_path)
             job = db.claim_next()
             if job is None:
                 if not settings.dry_run and time.monotonic() - last_upload_retry > UPLOAD_RETRY_INTERVAL_S:
-                    last_upload_retry = time.monotonic() - UPLOAD_RETRY_INTERVAL_S - 1  # first retry right after start-up
+                    last_upload_retry = time.monotonic()
                     pipeline.retry_pending_uploads()
+                if settings.etsy_enabled and not settings.dry_run and time.monotonic() - last_etsy_sync > etsy_interval:
+                    last_etsy_sync = time.monotonic()
+                    pipeline.sync_etsy_drafts()
                 stop.wait(settings.worker_idle_seconds)
                 continue
             pipeline.run_job(job)

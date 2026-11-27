@@ -108,6 +108,18 @@ class Settings(BaseSettings):
     shutterstock_password: str = ""
     shutterstock_remote_dir: str = "/"
 
+    # --- Etsy drafts (Open API v3; drafts only, the seller publishes by hand) -----------
+    etsy_enabled: bool = False
+    etsy_api_key: str = ""  # app keystring
+    etsy_shared_secret: str = ""
+    etsy_redirect_uri: str = ""  # https callback registered on etsy.com/developers
+    etsy_language: str = "it"  # language of the shop's listings: "it" or "en"
+    etsy_price: float = 4.90
+    etsy_quantity: int = 999
+    etsy_taxonomy_id: int = 0  # 0 = look up "Digital Prints" automatically
+    etsy_when_made: str = ""  # "" = current era, e.g. 2020_2026
+    etsy_sync_minutes: int = 5
+
     # --- Notifications -------------------------------------------------------------------
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
@@ -250,6 +262,11 @@ class Settings(BaseSettings):
                     problems.append(f"Upload target '{t.name}' enabled but username/password missing.")
         except ValueError as exc:
             problems.append(str(exc))
+        if self.etsy_enabled:
+            if not (self.etsy_api_key and self.etsy_shared_secret):
+                problems.append("ETSY_ENABLED is true but ETSY_API_KEY / ETSY_SHARED_SECRET are missing.")
+            if not self.etsy_redirect_uri.startswith("https://"):
+                problems.append("ETSY_REDIRECT_URI must be the https callback registered in the Etsy app.")
         return problems
 
 
