@@ -102,7 +102,7 @@ ruff check . && pytest -q
 
 ## Bozze Etsy automatiche (facoltativo)
 
-Con `ETSY_ENABLED=true` la pipeline crea su Etsy **solo bozze** (titolo, descrizione e tag nella lingua `ETSY_LANGUAGE`, prezzo `ETSY_PRICE`, tipo download, 3 mockup e gli zip). La pubblicazione resta manuale: la tassa di inserzione si paga quando premi "Pubblica".
+Con `ETSY_ENABLED=true` la pipeline crea su Etsy **solo bozze** (titolo, descrizione e tag nella lingua `ETSY_LANGUAGE`, più la traduzione nell'altra lingua it/en se `ETSY_TRANSLATE=true`, prezzo `ETSY_PRICE`, tipo download, 3 mockup e gli zip). La pubblicazione resta manuale: la tassa di inserzione si paga quando premi "Pubblica".
 
 1. Registra un'app personale su https://www.etsy.com/developers e annota *keystring* e *shared secret*.
 2. Registra come callback lo stesso indirizzo https che metti in `ETSY_REDIRECT_URI`.
