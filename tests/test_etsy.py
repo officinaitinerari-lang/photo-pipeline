@@ -127,9 +127,10 @@ def test_state_mismatch_is_rejected(tmp_path):
 
 
 class FakeEtsy:
-    def __init__(self, fail_file_once: bool = False):
+    def __init__(self, fail_file_once: bool = False, translation_ok: bool = True):
         self.requests: list[httpx.Request] = []
         self.fail_file_once = fail_file_once
+        self.translation_ok = translation_ok
 
     def __call__(self, req: httpx.Request) -> httpx.Response:
         self.requests.append(req)
@@ -148,6 +149,10 @@ class FakeEtsy:
             return httpx.Response(201, json={"listing_id": 555})
         if p.endswith("/images"):
             return httpx.Response(201, json={"listing_image_id": 1})
+        if "/translations/" in p:
+            body = req.content.decode()
+            assert req.method == "PUT" and p.endswith("/translations/en") and "English+body" in body
+            return httpx.Response(200 if self.translation_ok else 400, json={})
         if p.endswith("/files"):
             if self.fail_file_once:
                 self.fail_file_once = False
@@ -217,3 +222,26 @@ def test_refresh_on_expiry(tmp_path):
 def test_runtime_validation(tmp_path):
     s = Settings(data_root=tmp_path, gemini_api_key="g", etsy_enabled=True)
     assert any("ETSY_API_KEY" in p for p in s.validate_runtime())
+
+
+def test_refused_translation_does_not_block_the_draft(tmp_path):
+    s = _settings(tmp_path)
+    _with_token(s)
+    d = _package(tmp_path, n_zips=1)
+    fake = FakeEtsy(translation_ok=False)
+    c = EtsyClient(s, httpx.Client(transport=httpx.MockTransport(fake)))
+    assert c.sync() == 1
+    marker = json.loads((d / MARKER).read_text())
+    assert marker["status"] == "complete" and marker["translation"] == "failed"
+    assert c.sync() == 0  # no retry loop on the translation
+
+
+def test_translation_can_be_turned_off(tmp_path):
+    s = _settings(tmp_path, etsy_translate=False)
+    _with_token(s)
+    d = _package(tmp_path, n_zips=1)
+    fake = FakeEtsy()
+    c = EtsyClient(s, httpx.Client(transport=httpx.MockTransport(fake)))
+    assert c.sync() == 1
+    assert "translation" not in json.loads((d / MARKER).read_text())
+    assert not any("/translations/" in r.url.path for r in fake.requests)
