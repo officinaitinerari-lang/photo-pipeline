@@ -113,7 +113,8 @@ class Settings(BaseSettings):
     etsy_api_key: str = ""  # app keystring
     etsy_shared_secret: str = ""
     etsy_redirect_uri: str = ""  # https callback registered on etsy.com/developers
-    etsy_language: str = "it"  # language of the shop's listings: "it" or "en"
+    etsy_language: str = "it"  # the shop's main language: "it" or "en"
+    etsy_translate: bool = True  # also add the other language (it <-> en) as an Etsy translation
     etsy_price: float = 4.90
     etsy_quantity: int = 999
     etsy_taxonomy_id: int = 0  # 0 = look up "Digital Prints" automatically

@@ -44,6 +44,7 @@ MAX_TITLE_LEN = 140
 
 _TAG_BAD = re.compile(r"[^\w\s\-'™©®]|_", re.UNICODE)
 _SECTION_TITLES = {"it": "ITALIANO", "en": "ENGLISH"}
+_OTHER_LANGUAGE = {"it": "en", "en": "it"}
 
 
 class EtsyError(Exception):
@@ -327,12 +328,33 @@ class EtsyClient:
             marker["files"].append(z.name)
             marker_path.write_text(json.dumps(marker, indent=1), encoding="utf-8")
 
+        other = _OTHER_LANGUAGE.get(self.s.etsy_language.lower())
+        if self.s.etsy_translate and other and "translation" not in marker:
+            marker["translation"] = self._translate(shop, int(listing_id), slug_dir, other)
+            marker_path.write_text(json.dumps(marker, indent=1), encoding="utf-8")
+
         marker["status"] = "complete"
         marker["completed_at"] = _dt.datetime.now().isoformat(timespec="seconds")
         marker_path.write_text(json.dumps(marker, indent=1), encoding="utf-8")
         log.info("Etsy draft ready", extra={"slug": slug_dir.name, "listing_id": listing_id,
                                             "images": len(mockups), "files": len(zips)})
         return int(listing_id)
+
+    def _translate(self, shop: int, listing_id: int, slug_dir: Path, language: str) -> str:
+        """Add the second language as an Etsy translation. A refusal (for example the language is not
+        enabled in the shop) is logged and never blocks the draft."""
+        try:
+            text = parse_listing_file(slug_dir / "etsy_listing.txt", language)
+        except (EtsyError, OSError) as exc:
+            log.warning("Etsy translation skipped", extra={"slug": slug_dir.name, "reason": str(exc)})
+            return "skipped"
+        r = self._request("PUT", f"/shops/{shop}/listings/{listing_id}/translations/{language}",
+                          data={"title": text.title, "description": text.description, "tags": ",".join(text.tags)})
+        if r.status_code >= 300:
+            log.warning("Etsy translation refused", extra={"slug": slug_dir.name, "language": language,
+                                                           "status": r.status_code, "body": r.text[:300]})
+            return "failed"
+        return language
 
     def _create_listing(self, shop: int, text: ListingText) -> int:
         base = {
