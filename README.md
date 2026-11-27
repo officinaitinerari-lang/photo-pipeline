@@ -90,7 +90,7 @@ docker exec photo-pipeline python -m src.main process /data/input/foto.jpg
 - **Errori**: gli errori temporanei vengono ritentati (`MAX_JOB_ATTEMPTS`, con attesa crescente). I file illeggibili vanno subito in `failed/`. Gli upload falliti vengono ritentati ogni ora.
 - **Microstock**: si esporta l'originale sviluppato, non la versione ingrandita (le agenzie rifiutano le immagini ingrandite). Sotto i 4 MP viene ingrandito con Lanczos. Il GPS viene rimosso per default.
 - **Upscaling**: solo se il lato lungo è sotto 6000 px, con obiettivo 7200 px. Le pellicole usano solo Lanczos a piccoli passi più un leggero micro-contrasto, mai il modello AI.
-- **Etsy**: ogni stampa JPEG resta sotto `MAX_PRINT_FILE_MB`, abbassando la qualità solo se necessario. Etsy accetta al massimo 5 file per inserzione: con foto molto dettagliate gli zip divisi possono superare questo numero. In quel caso aumenta la compressione (`JPEG_QUALITY_PRINTS=90`) o carica meno formati.
+- **Etsy**: ogni stampa JPEG resta sotto `MAX_PRINT_FILE_MB` e ogni zip sotto 19 MiB (meno di 20 MB). Etsy accetta al massimo 5 file per inserzione: se gli zip sarebbero di più, la pipeline rifà le stampe con qualità JPEG un po' più bassa (mai sotto `JPEG_QUALITY_MIN`) e, come ultima risorsa, lascia fuori le Gallery Poster.
 - Il formato 2:3 è 4800×7200 px: 300 DPI nativi fino a 16×24 in (40×60 cm); 24×36 in risulta a circa 200 DPI, come indicato nell'infografica.
 
 ## Sviluppo
@@ -99,3 +99,13 @@ docker exec photo-pipeline python -m src.main process /data/input/foto.jpg
 pip install -r requirements-dev.txt
 ruff check . && pytest -q
 ```
+
+## Bozze Etsy automatiche (facoltativo)
+
+Con `ETSY_ENABLED=true` la pipeline crea su Etsy **solo bozze** (titolo, descrizione e tag nella lingua `ETSY_LANGUAGE`, prezzo `ETSY_PRICE`, tipo download, 3 mockup e gli zip). La pubblicazione resta manuale: la tassa di inserzione si paga quando premi "Pubblica".
+
+1. Registra un'app personale su https://www.etsy.com/developers e annota *keystring* e *shared secret*.
+2. Registra come callback lo stesso indirizzo https che metti in `ETSY_REDIRECT_URI`.
+3. Imposta `ETSY_API_KEY`, `ETSY_SHARED_SECRET`, `ETSY_REDIRECT_URI`, `ETSY_ENABLED=true` e `DRY_RUN=false`, poi riavvia.
+4. La pipeline scrive il link di autorizzazione in `state/etsy_auth_url.txt`. Aprilo, premi "Consenti" e salva l'indirizzo completo della pagina a cui vieni rimandato in `state/etsy_auth_code.txt`. Entro pochi minuti il token viene salvato in `state/etsy_token.json`.
+5. Ogni `ETSY_SYNC_MINUTES` la pipeline crea le bozze mancanti. In ogni cartella `output/etsy/<slug>/` il file `etsy_draft.json` registra la bozza; un file con `{"status": "skip"}` esclude la cartella.
